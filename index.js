@@ -29,6 +29,7 @@ async function runTask(ecs, clusterName, taskDefArn, waitForMinutes) {
   const launchType = core.getInput('run-task-launch-type', { required: false }) || 'FARGATE';
   const subnetIds = core.getInput('run-task-subnets', { required: false }) || '';
   const securityGroupIds = core.getInput('run-task-security-groups', { required: false }) || '';
+  const assignPublicIp = core.getInput('run-task-assign-public-ip', { required: false }) || '';
   const containerOverrides = JSON.parse(core.getInput('run-task-container-overrides', { required: false }) || '[]');
   let awsvpcConfiguration = {}
 
@@ -38,6 +39,10 @@ async function runTask(ecs, clusterName, taskDefArn, waitForMinutes) {
 
   if (securityGroupIds != "") {
     awsvpcConfiguration["securityGroups"] = securityGroupIds.split(',')
+  }
+
+  if (assignPublicIp != "") {
+    awsvpcConfiguration["assignPublicIp"] = assignPublicIp ? "ENABLED" : "DISABLED"
   }
 
   const runTaskResponse = await ecs.runTask({

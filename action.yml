@@ -52,6 +52,9 @@ inputs:
   run-task-started-by:
     description: "A name to use for the startedBy tag when running a task outside of a service. Will default to 'GitHub-Actions'."
     required: false
+  run-task-assign-public-ip:
+    description: "A boolean indicating whether to assign a public IP to the task."
+    required: false
   wait-for-task-stopped:
     description: 'Whether to wait for the task to stop when running it outside of a service. Will default to not wait.'
     required: false
