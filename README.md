@@ -240,6 +240,10 @@ In the following example, the service would not be updated until the ad-hoc task
         wait-for-task-stopped: true
 ```
 
+With `wait-for-task-stopped: true`, the action requires the exact task ARN and task definition from the task launch. The task must have status `STOPPED` and stop code `EssentialContainerExited`. Every container in the task definition must be present, stopped, and have a numeric exit code of zero. This requirement includes nonessential sidecars. The action rejects missing results, task lookup failures, and abnormal stops before it updates the service.
+
+Without `wait-for-task-stopped: true`, the action validates the task launch but does not verify task completion.
+
 Overrides and VPC networking options are available as well. See [actions.yml](actions.yml) for more details.
 
 ## Troubleshooting

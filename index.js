@@ -22,8 +22,17 @@ const IGNORED_TASK_DEFINITION_ATTRIBUTES = [
 ];
 
 // Run task outside of a service
-async function runTask(ecs, clusterName, taskDefArn, waitForMinutes) {
+async function runTask(ecs, clusterName, taskDefArn, waitForMinutes, containerDefinitions) {
   core.info('Running task')
+
+  const containerNames = Array.isArray(containerDefinitions)
+    ? containerDefinitions.map(container => container?.name)
+    : [];
+  if (containerNames.length === 0 ||
+      containerNames.some(name => typeof name !== 'string' || name.trim() === '') ||
+      new Set(containerNames).size !== containerNames.length) {
+    throw new Error('Task container definitions must contain unique, nonempty names');
+  }
 
   const waitForTask = core.getInput('wait-for-task-stopped', { required: false }) || 'false';
   const startedBy = core.getInput('run-task-started-by', { required: false }) || 'GitHub-Actions';
@@ -59,7 +68,20 @@ async function runTask(ecs, clusterName, taskDefArn, waitForMinutes) {
 
   core.debug(`Run task response ${JSON.stringify(runTaskResponse)}`)
 
-  const taskArns = runTaskResponse.tasks.map(task => task.taskArn);
+  if (runTaskResponse.failures && runTaskResponse.failures.length > 0) {
+    throw new Error(`Run task failed: ${JSON.stringify(runTaskResponse.failures)}`);
+  }
+  if (!Array.isArray(runTaskResponse.tasks) || runTaskResponse.tasks.length !== 1) {
+    throw new Error('Run task must return exactly one task');
+  }
+  const task = runTaskResponse.tasks[0];
+  if (typeof task?.taskArn !== 'string' || task.taskArn.trim() === '') {
+    throw new Error('Run task must return a nonempty task ARN');
+  }
+  if (task.taskDefinitionArn !== taskDefArn) {
+    throw new Error(`Run task returned an unexpected task definition: ${task.taskDefinitionArn}`);
+  }
+  const taskArns = [task.taskArn];
   core.setOutput('run-task-arn', taskArns);
 
   const region = await ecs.config.region();
@@ -67,15 +89,10 @@ async function runTask(ecs, clusterName, taskDefArn, waitForMinutes) {
 
   core.info(`Task running: https://${consoleHostname}/ecs/home?region=${region}#/clusters/${clusterName}/tasks`);
 
-  if (runTaskResponse.failures && runTaskResponse.failures.length > 0) {
-    const failure = runTaskResponse.failures[0];
-    throw new Error(`${failure.arn} is ${failure.reason}`);
-  }
-
   // Wait for task to end
   if (waitForTask && waitForTask.toLowerCase() === "true") {
     await waitForTasksStopped(ecs, clusterName, taskArns, waitForMinutes)
-    await tasksExitCode(ecs, clusterName, taskArns)
+    await tasksExitCode(ecs, clusterName, taskArns, taskDefArn, containerNames)
   } else {
     core.debug('Not waiting for the task to stop');
   }
@@ -102,28 +119,47 @@ async function waitForTasksStopped(ecs, clusterName, taskArns, waitForMinutes) {
   core.info('All tasks have stopped.');
 }
 
-// Check a task's exit code and fail the job on error
-async function tasksExitCode(ecs, clusterName, taskArns) {
+// Require the expected stopped task and a successful exit from every defined container.
+async function tasksExitCode(ecs, clusterName, taskArns, taskDefArn, containerNames) {
   const describeResponse = await ecs.describeTasks({
     cluster: clusterName,
     tasks: taskArns
   });
 
-  const containers = [].concat(...describeResponse.tasks.map(task => task.containers))
-  const exitCodes = containers.map(container => container.exitCode)
-  const reasons = containers.map(container => container.reason)
+  if (describeResponse.failures && describeResponse.failures.length > 0) {
+    throw new Error(`Task lookup failed: ${JSON.stringify(describeResponse.failures)}`);
+  }
+  if (!Array.isArray(describeResponse.tasks) ||
+      describeResponse.tasks.length !== taskArns.length ||
+      new Set(describeResponse.tasks.map(task => task?.taskArn)).size !== taskArns.length ||
+      describeResponse.tasks.some(task => !taskArns.includes(task?.taskArn))) {
+    throw new Error('Task lookup did not return exactly the expected task ARNs');
+  }
 
-  const failuresIdx = [];
-
-  exitCodes.filter((exitCode, index) => {
-    if (exitCode !== 0) {
-      failuresIdx.push(index)
+  for (const task of describeResponse.tasks) {
+    if (task.taskDefinitionArn !== taskDefArn) {
+      throw new Error(`Task ${task.taskArn} returned an unexpected task definition: ${task.taskDefinitionArn}`);
     }
-  })
-
-  const failures = reasons.filter((_, index) => failuresIdx.indexOf(index) !== -1)
-  if (failures.length > 0) {
-    throw new Error(`Run task failed: ${JSON.stringify(failures)}`);
+    if (task.lastStatus !== 'STOPPED') {
+      throw new Error(`Task ${task.taskArn} must be STOPPED, received ${task.lastStatus}`);
+    }
+    if (task.stopCode !== 'EssentialContainerExited') {
+      throw new Error(`Task ${task.taskArn} has an unsuccessful stop code: ${task.stopCode}`);
+    }
+    if (!Array.isArray(task.containers) ||
+        task.containers.length !== containerNames.length ||
+        new Set(task.containers.map(container => container?.name)).size !== containerNames.length ||
+        task.containers.some(container => !containerNames.includes(container?.name))) {
+      throw new Error(`Task ${task.taskArn} did not return exactly the expected containers: ${containerNames.join(', ')}`);
+    }
+    for (const container of task.containers) {
+      if (container.lastStatus !== 'STOPPED') {
+        throw new Error(`Container ${container.name} must be STOPPED, received ${container.lastStatus}`);
+      }
+      if (container.exitCode !== 0) {
+        throw new Error(`Container ${container.name} has unsuccessful exit code ${container.exitCode}: ${container.reason || 'no reason reported'}`);
+      }
+    }
   }
 }
 
@@ -416,7 +452,7 @@ async function run() {
     core.debug(`shouldRunTask: ${shouldRunTask}`);
     if (shouldRunTask) {
       core.debug("Running ad-hoc task...");
-      await runTask(ecs, clusterName, taskDefArn, waitForMinutes);
+      await runTask(ecs, clusterName, taskDefArn, waitForMinutes, taskDefContents.containerDefinitions);
     }
 
     // Update the service with the new task definition
