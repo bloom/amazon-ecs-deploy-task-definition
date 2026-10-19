@@ -128,8 +128,8 @@ describe('Deploy to ECS', () => {
                         ],
                         desiredStatus: "RUNNING",
                         lastStatus: "RUNNING",
-                        taskArn: "arn:aws:ecs:fake-region:account_id:task/arn"
-                        // taskDefinitionArn: "arn:aws:ecs:<region>:<aws_account_id>:task-definition/amazon-ecs-sample:1"
+                        taskArn: "arn:aws:ecs:fake-region:account_id:task/arn",
+                        taskDefinitionArn: 'task:def:arn'
                     }
                 ]
             }));
@@ -139,16 +139,10 @@ describe('Deploy to ECS', () => {
                 failures: [],
                 tasks: [
                     {
-                        containers: [
-                            {
-                                lastStatus: "RUNNING",
-                                exitCode: 0,
-                                reason: '',
-                                taskArn: "arn:aws:ecs:fake-region:account_id:task/arn"
-                            }
-                        ],
-                        desiredStatus: "RUNNING",
-                        lastStatus: "RUNNING",
+                        containers: [{ name: 'app', lastStatus: 'STOPPED', exitCode: 0 }],
+                        lastStatus: 'STOPPED',
+                        stopCode: 'EssentialContainerExited',
+                        taskDefinitionArn: 'task:def:arn',
                         taskArn: "arn:aws:ecs:fake-region:account_id:task/arn"
                     }
                 ]
@@ -1104,6 +1098,7 @@ describe('Deploy to ECS', () => {
     });
 
     test('run task', async () => {
+        fs.readFileSync.mockReturnValue(JSON.stringify({ family: 'task-def-family', containerDefinitions: [{ name: 'app' }] }));
         core.getInput = jest
             .fn()
             .mockReturnValueOnce('task-definition.json')  // task-definition
@@ -1118,13 +1113,14 @@ describe('Deploy to ECS', () => {
         await run();
         expect(core.setFailed).toHaveBeenCalledTimes(0);
 
-        expect(mockEcsRegisterTaskDef).toHaveBeenNthCalledWith(1, { family: 'task-def-family' });
+        expect(mockEcsRegisterTaskDef).toHaveBeenNthCalledWith(1, { family: 'task-def-family', containerDefinitions: [{ name: 'app' }] });
         expect(core.setOutput).toHaveBeenNthCalledWith(1, 'task-definition-arn', 'task:def:arn');
         expect(mockRunTask).toHaveBeenCalledTimes(1);
         expect(core.setOutput).toHaveBeenNthCalledWith(2, 'run-task-arn', ["arn:aws:ecs:fake-region:account_id:task/arn"]);
     });
 
     test('run task with options', async () => {
+        fs.readFileSync.mockReturnValue(JSON.stringify({ family: 'task-def-family', containerDefinitions: [{ name: 'app' }] }));
         core.getInput = jest
             .fn()
             .mockReturnValueOnce('task-definition.json')  // task-definition
@@ -1140,12 +1136,13 @@ describe('Deploy to ECS', () => {
             .mockReturnValueOnce('EC2')                   // run-task-launch-type
             .mockReturnValueOnce('a,b')                   // run-task-subnet-ids
             .mockReturnValueOnce('c,d')                   // run-task-security-group-ids
+            .mockReturnValueOnce('')                      // run-task-assign-public-ip
             .mockReturnValueOnce(JSON.stringify([{ name: 'someapp', command: 'somecmd' }])); // run-task-container-overrides
 
         await run();
         expect(core.setFailed).toHaveBeenCalledTimes(0);
 
-        expect(mockEcsRegisterTaskDef).toHaveBeenNthCalledWith(1, { family: 'task-def-family' });
+        expect(mockEcsRegisterTaskDef).toHaveBeenNthCalledWith(1, { family: 'task-def-family', containerDefinitions: [{ name: 'app' }] });
         expect(core.setOutput).toHaveBeenNthCalledWith(1, 'task-definition-arn', 'task:def:arn');
         expect(mockRunTask).toHaveBeenCalledWith({
             startedBy: 'someJoe',
@@ -1159,6 +1156,7 @@ describe('Deploy to ECS', () => {
     });
 
     test('run task and wait for it to stop', async () => {
+        fs.readFileSync.mockReturnValue(JSON.stringify({ family: 'task-def-family', containerDefinitions: [{ name: 'app' }] }));
         core.getInput = jest
             .fn()
             .mockReturnValueOnce('task-definition.json')  // task-definition
@@ -1174,7 +1172,7 @@ describe('Deploy to ECS', () => {
         await run();
         expect(core.setFailed).toHaveBeenCalledTimes(0);
 
-        expect(mockEcsRegisterTaskDef).toHaveBeenNthCalledWith(1, { family: 'task-def-family' });
+        expect(mockEcsRegisterTaskDef).toHaveBeenNthCalledWith(1, { family: 'task-def-family', containerDefinitions: [{ name: 'app' }] });
         expect(core.setOutput).toHaveBeenNthCalledWith(1, 'task-definition-arn', 'task:def:arn')
         expect(mockRunTask).toHaveBeenCalledTimes(1);
         expect(core.setOutput).toHaveBeenNthCalledWith(2, 'run-task-arn', ["arn:aws:ecs:fake-region:account_id:task/arn"])
