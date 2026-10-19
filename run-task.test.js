@@ -155,6 +155,21 @@ describe('waited task result validation', () => {
     });
 });
 
+describe('registered task definition identity', () => {
+    test.each([
+        ['missing response definition', {}],
+        ['missing ARN', { taskDefinition: {} }],
+        ['empty ARN', { taskDefinition: { taskDefinitionArn: '' } }],
+        ['nonstring ARN', { taskDefinition: { taskDefinitionArn: 123 } }]
+    ])('rejects %s before task launch', async (_name, response) => {
+        ecs.registerTaskDefinition.mockResolvedValue(response);
+        await run();
+        expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/registered task definition ARN/i));
+        expect(ecs.runTask).not.toHaveBeenCalled();
+        expectNoServiceUpdate();
+    });
+});
+
 describe('task container definitions', () => {
     test.each([
         ['missing definitions', undefined],

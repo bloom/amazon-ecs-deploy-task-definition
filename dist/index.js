@@ -448,7 +448,10 @@ async function run() {
       core.debug(JSON.stringify(taskDefContents, undefined, 4));
       throw(error);
     }
-    const taskDefArn = registerResponse.taskDefinition.taskDefinitionArn;
+    const taskDefArn = registerResponse.taskDefinition?.taskDefinitionArn;
+    if (typeof taskDefArn !== 'string' || taskDefArn.trim() === '') {
+      throw new Error('The registered task definition ARN must be a nonempty string');
+    }
     core.setOutput('task-definition-arn', taskDefArn);
 
     // Run the task outside of the service
